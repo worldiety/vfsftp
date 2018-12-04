@@ -8,7 +8,7 @@ import (
 )
 
 func TestConnect(t *testing.T) {
-	dp, err := Connect(os.Getenv("TEST_SERVER"), os.Getenv("TEST_SERVER_LOGIN"), os.Getenv("TEST_SERVER_PWD"))
+	dp, err := Connect(os.Getenv("TEST_SERVER"), os.Getenv("TEST_SERVER_LOGIN"), os.Getenv("TEST_SERVER_PWD"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

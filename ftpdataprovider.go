@@ -1,65 +1,180 @@
 package ftp
 
 import (
+	"bytes"
 	"github.com/jlaffaye/ftp"
 	"github.com/worldiety/vfs"
 	"io"
+	"net/textproto"
 	"os"
+	"path/filepath"
 )
 
 type ftpDataProvider struct {
-	conn *ftp.ServerConn
+	conn   *ftp.ServerConn
+	Prefix string
 }
 
-// Connect connects to the ftp and performs a login
-func Connect(adr string, login string, password string) (vfs.DataProvider, error) {
+// Connect connects to the ftp and performs a login. pathPrefix can be empty and is added to any path before
+// resolving. You can use it to simply mount a sub folder.
+// This FTP implementation is NOT thread safe, because it only ever uses a single connection which is
+// stateful.
+func Connect(adr string, login string, password string, pathPrefix string) (vfs.DataProvider, error) {
 	conn, err := ftp.Connect(adr)
 	if err != nil {
 		return nil, err
 	}
-	return &ftpDataProvider{conn}, nil
+	err = conn.Login(login, password)
+	if err != nil {
+		return nil, err
+	}
+	return &ftpDataProvider{conn, pathPrefix}, nil
 }
 
+// Resolve creates a platform specific filename from the given invariant path by adding the Prefix and using
+// the platform specific name separator. If AllowRelativePaths is false (default), .. will be silently ignored.
+func (dp *ftpDataProvider) Resolve(path vfs.Path) string {
+	if len(dp.Prefix) == 0 {
+		return path.String()
+	}
+	// security feature: we normalize our path, before adding the prefix to avoid breaking out of our root
+	path = path.Normalize()
+	return filepath.Join(dp.Prefix, filepath.Join(path.Names()...))
+}
+
+// Read details: see vfs.DataProvider#Read
 func (dp *ftpDataProvider) Read(path vfs.Path) (io.ReadCloser, error) {
-	panic("implement me")
+	res, err := dp.conn.Retr(dp.Resolve(path))
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
+// Write details: see vfs.DataProvider#Write
 func (dp *ftpDataProvider) Write(path vfs.Path) (io.WriteCloser, error) {
-	//dp.conn.Stor()
-	panic("implement me")
+	return &bufferedWriter{&bytes.Buffer{}, dp, dp.Resolve(path)}, nil
 }
 
+// Delete details: see vfs.DataProvider#Delete
 func (dp *ftpDataProvider) Delete(path vfs.Path) error {
-	panic("implement me")
+	err := dp.conn.Delete(dp.Resolve(path))
+	if err != nil {
+		err2 := dp.conn.RemoveDirRecur(dp.Resolve(path))
+		if err2 != nil {
+			_, err3 := dp.conn.FileSize(dp.Resolve(path))
+			if protoErr, ok := err3.(*textproto.Error); ok {
+				if protoErr.Code == ftp.StatusFileUnavailable {
+					return nil
+				}
+			}
+		}
+		return nil
+	}
+	return err
 }
 
+// ReadAttrs details: see vfs.DataProvider#ReadAttrs
 func (dp *ftpDataProvider) ReadAttrs(path vfs.Path, dest interface{}) error {
-	panic("implement me")
+	//this is ugly, because the current ftp implementation does not support the STAT request
+	if info, ok := dest.(*vfs.ResourceInfo); ok {
+		//do it by listing
+		absPath := dp.Resolve(path)
+		parentPath := vfs.Path(absPath).Parent().String()
+		childName := path.Name()
+
+		list, err := dp.conn.List(parentPath)
+		if err != nil {
+			return err
+		}
+		for _, entry := range list {
+			if entry.Name == childName {
+				info.Name = entry.Name
+				info.ModTime = entry.Time.UnixNano() / 1e6
+				switch entry.Type {
+				case ftp.EntryTypeFile:
+					info.Mode = 0
+				case
+					ftp.EntryTypeFolder:
+					info.Mode = os.ModeDir
+				case ftp.EntryTypeLink:
+					info.Mode = os.ModeSymlink
+				}
+				info.Size = int64(entry.Size)
+				return nil
+			}
+		}
+	}
+	return &vfs.UnsupportedAttributesError{Data: dest}
 }
 
+// WriteAttrs details: see vfs.DataProvider#WriteAttrs
 func (dp *ftpDataProvider) WriteAttrs(path vfs.Path, src interface{}) error {
-	panic("implement me")
+	return &vfs.UnsupportedOperationError{}
 }
 
+// ReadDir details: see vfs.DataProvider#ReadDir
 func (dp *ftpDataProvider) ReadDir(path vfs.Path) (vfs.DirEntList, error) {
 	entries, err := dp.conn.List(path.String())
 	if err != nil {
 		return nil, err
 	}
 
-	return &fileInfoDirEntList{entries}, nil
+	tmp := make([]*ftp.Entry, len(entries))[0:0]
+	for _, entry := range entries {
+		if entry.Name == "." || entry.Name == ".." {
+			continue
+		}
+		tmp = append(tmp, entry)
+	}
+
+	return &fileInfoDirEntList{tmp}, nil
 }
 
 func (dp *ftpDataProvider) MkDirs(path vfs.Path) error {
-	panic("implement me")
+	//optimistic creation first
+	err := dp.conn.MakeDir(dp.Resolve(path))
+	if protoErr, ok := err.(*textproto.Error); ok {
+		if protoErr.Code == ftp.StatusFileUnavailable {
+			//fallback to recursive behavior
+			chain := ""
+			for _, dir := range vfs.Path(dp.Resolve(path)).Names() {
+				chain += "/" + dir
+				if ok, _ := dp.exists(chain); !ok {
+					err2 := dp.conn.MakeDir(chain)
+					if err2 != nil {
+						return err2
+					}
+				}
+
+			}
+
+		}
+	}
+	return nil
 }
 
+func (dp *ftpDataProvider) exists(absPath string) (bool, error) {
+	_, err := dp.conn.FileSize(absPath)
+	if protoErr, ok := err.(*textproto.Error); ok {
+		if protoErr.Code == ftp.StatusFileUnavailable {
+			return false, nil
+		}
+	}
+	if err != nil {
+		return true, nil
+	}
+	return false, err
+}
+
+// Rename details: see vfs.DataProvider#Rename
 func (dp *ftpDataProvider) Rename(oldPath vfs.Path, newPath vfs.Path) error {
-	panic("implement me")
+	return dp.conn.Rename(dp.Resolve(oldPath), dp.Resolve(newPath))
 }
 
+// Close quits the ftp connection
 func (dp *ftpDataProvider) Close() error {
-	panic("implement me")
+	return dp.conn.Quit()
 }
 
 type fileInfoDirEntList struct {
@@ -82,7 +197,7 @@ func (l *fileInfoDirEntList) Size() int64 {
 	return int64(len(l.list))
 }
 
-//does nothing
+// Close does nothing
 func (l *fileInfoDirEntList) Close() error {
 	return nil
 }
@@ -109,4 +224,36 @@ func (f *fileScanner) Scan(dest interface{}) error {
 		return nil
 	}
 	return &vfs.UnsupportedAttributesError{Data: dest}
+}
+
+// TODO buffering in memory is a bad idea but piping is also ugly because of the extra go routine and channel logic
+type bufferedWriter struct {
+	buf  *bytes.Buffer
+	dp   *ftpDataProvider
+	path string
+}
+
+func (b *bufferedWriter) Write(p []byte) (n int, err error) {
+	return b.buf.Write(p)
+}
+
+func (b *bufferedWriter) Close() error {
+	err := b.dp.conn.Stor(b.path, bytes.NewReader(b.buf.Bytes()))
+	if perr, ok := err.(*textproto.Error); ok {
+		if perr.Code == ftp.StatusFileUnavailable {
+			//retry by creating parent directory first
+			err2 := b.dp.MkDirs(vfs.Path(b.path).Parent())
+			if err2 != nil {
+				return err2
+			}
+
+			// oh, we created the parent successfully, retry the write
+			err3 := b.dp.conn.Stor(b.path, bytes.NewReader(b.buf.Bytes()))
+			if err3 != nil {
+				//intentionally return the first error
+				return err
+			}
+		}
+	}
+	return nil
 }

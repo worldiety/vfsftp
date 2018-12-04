@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 )
-//TODO fix me by pulling into a CTS module
 
+//TODO fix me by pulling into a CTS module
 
 // A Check tells if a DataProvider has a specific property or not
 type Check struct {
@@ -103,7 +103,7 @@ var CheckIsEmpty = &Check{
 		if len(list) == 0 {
 			return nil
 		}
-		return fmt.Errorf("DataProvider is not empty and cannot clear it")
+		return fmt.Errorf("DataProvider is not empty and cannot clear it: %v", len(list))
 	},
 	Name:        "Empty",
 	Description: "Checks the corner case of an empty DataProvider",
@@ -304,19 +304,17 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 	err = dp.ReadAttrs(c, mustNotSupport)
 	if err == nil {
 		return fmt.Errorf("reading into a generic unsupportedType{} with private members and no public fields is an error")
-	} else {
-		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
-			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
-		}
+	}
+	if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+		return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 	}
 
 	err = dp.ReadAttrs(c, "hello world")
 	if err == nil {
 		return fmt.Errorf("reading into a value type like a string is always a programming error")
-	} else {
-		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
-			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
-		}
+	}
+	if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+		return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 	}
 
 	dir, err := dp.ReadDir("")
@@ -335,20 +333,19 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 		err = scanner.Scan(mustNotSupport)
 		if err == nil {
 			return fmt.Errorf("reading into a generic unsupportedType{} with private members and no public fields is an error")
-		} else {
-			if vfs.UnwrapUnsupportedAttributesError(err) == nil {
-				return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
-			}
+		}
+		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 		}
 
 		err = scanner.Scan("hello world")
 		if err == nil {
 			return fmt.Errorf("reading into a value type like a string is always a programming error")
-		} else {
-			if vfs.UnwrapUnsupportedAttributesError(err) == nil {
-				return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
-			}
 		}
+		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
+		}
+
 		count++
 
 		return nil
@@ -368,11 +365,11 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 	err = dp.WriteAttrs(c, mustNotSupport)
 	if err == nil {
 		return fmt.Errorf("writing from a generic unsupportedType{} with private members and no public fields is an error")
-	} else {
-		if vfs.UnwrapUnsupportedAttributesError(err) == nil && vfs.UnwrapUnsupportedOperationError(err) == nil {
-			return fmt.Errorf("expected UnsupportedAttributesError or UnsupportedOperationError but got %v", err)
-		}
 	}
+	if vfs.UnwrapUnsupportedAttributesError(err) == nil && vfs.UnwrapUnsupportedOperationError(err) == nil {
+		return fmt.Errorf("expected UnsupportedAttributesError or UnsupportedOperationError but got %v", err)
+	}
+
 	return nil
 
 },
