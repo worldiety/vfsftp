@@ -211,7 +211,7 @@ var CheckWriteAndRead = &Check{
 		return nil
 	},
 	Name:        "Write and Read",
-	Description: "Write some stuff and read it agains",
+	Description: "Write some stuff and read it again",
 }
 
 var CheckRename = &Check{

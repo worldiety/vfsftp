@@ -2,13 +2,18 @@ package vfsftp
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"testing"
 )
 
 func TestConnect(t *testing.T) {
-	dp, err := Connect(os.Getenv("TEST_SERVER"), os.Getenv("TEST_SERVER_LOGIN"), os.Getenv("TEST_SERVER_PWD"), "")
+	curl, err := url.Parse(fmt.Sprintf("ftp://%v:%v@%v", os.Getenv("TEST_SERVER_LOGIN"), os.Getenv("TEST_SERVER_PWD"), os.Getenv("TEST_SERVER")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dp, err := Connect(curl)
 	if err != nil {
 		t.Fatal(err)
 	}

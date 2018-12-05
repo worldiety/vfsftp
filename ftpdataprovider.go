@@ -6,6 +6,7 @@ import (
 	"github.com/worldiety/vfs"
 	"io"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
 )
@@ -15,11 +16,15 @@ type ftpDataProvider struct {
 	Prefix string
 }
 
-// Connect connects to the ftp and performs a login. pathPrefix can be empty and is added to any path before
-// resolving. You can use it to simply mount a sub folder.
+// Connect opens the ftp and performs a login using information from the url.
 // This FTP implementation is NOT thread safe, because it only ever uses a single connection which is
 // stateful.
-func Connect(adr string, login string, password string, pathPrefix string) (vfs.DataProvider, error) {
+func Connect(url *url.URL) (vfs.DataProvider, error) {
+	adr := url.Host
+	login := url.User.Username()
+	password, _ := url.User.Password()
+	pathPrefix := url.Path
+
 	conn, err := ftp.Connect(adr)
 	if err != nil {
 		return nil, err
