@@ -1,18 +1,16 @@
-package ftp
+package vfsftp
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/worldiety/vfs"
+	. "github.com/worldiety/vfs"
 	"strconv"
 	"strings"
 )
 
-//TODO fix me by pulling into a CTS module
-
 // A Check tells if a DataProvider has a specific property or not
 type Check struct {
-	Test        func(dp vfs.DataProvider) error
+	Test        func(dp DataProvider) error
 	Name        string
 	Description string
 }
@@ -61,9 +59,10 @@ func (t *CTS) All() {
 	}
 }
 
-func (t *CTS) Run(dp vfs.DataProvider) CTSResult {
+func (t *CTS) Run(dp DataProvider) CTSResult {
 	res := make([]*CheckResult, 0)
 	for _, check := range t.checks {
+		SetDefault(dp)
 		err := check.Test(dp)
 		res = append(res, &CheckResult{check, err})
 	}
@@ -80,8 +79,8 @@ func generateTestSlice(len int) []byte {
 
 //======== our actual checks =============
 var CheckIsEmpty = &Check{
-	Test: func(dp vfs.DataProvider) error {
-		list, err := vfs.ReadDir(dp, "")
+	Test: func(dp DataProvider) error {
+		list, err := ReadDirEnt("")
 		if err != nil {
 			return err
 		}
@@ -90,28 +89,28 @@ var CheckIsEmpty = &Check{
 		}
 		//not empty, try to clear to make test a bit more robust
 		for _, entry := range list {
-			err := dp.Delete(vfs.Path(entry.Name))
+			err := dp.Delete(Path(entry.Name))
 			if err != nil {
 				return err
 			}
 		}
 		// recheck
-		list, err = vfs.ReadDir(dp, "")
+		list, err = ReadDirEnt("")
 		if err != nil {
 			return err
 		}
 		if len(list) == 0 {
 			return nil
 		}
-		return fmt.Errorf("DataProvider is not empty and cannot clear it: %v", len(list))
+		return fmt.Errorf("DataProvider is not empty and cannot clear it")
 	},
 	Name:        "Empty",
 	Description: "Checks the corner case of an empty DataProvider",
 }
 
 var CheckCanWrite0 = &Check{
-	Test: func(dp vfs.DataProvider) error {
-		paths := []vfs.Path{"", "/", "/canWrite0", "/canWrite0/subfolder", "canWrite0_1/subfolder1/subfolder2"}
+	Test: func(dp DataProvider) error {
+		paths := []Path{"", "/", "/canWrite0", "/canWrite0/subfolder", "canWrite0_1/subfolder1/subfolder2"}
 		lengths := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 512, 1024, 4096, 4097, 8192, 8193}
 		for _, path := range paths {
 			for _, testLen := range lengths {
@@ -144,8 +143,8 @@ var CheckCanWrite0 = &Check{
 }
 
 var CheckReadAny = &Check{
-	Test: func(dp vfs.DataProvider) error {
-		list, err := vfs.ReadDirs(dp, "")
+	Test: func(dp DataProvider) error {
+		list, err := ReadDirEntRecur("")
 		if err != nil {
 			return err
 		}
@@ -157,7 +156,7 @@ var CheckReadAny = &Check{
 			if entry.Resource.Mode.IsDir() {
 				continue
 			}
-			tmp, err := vfs.ReadAll(dp, entry.Path)
+			tmp, err := ReadAll(entry.Path)
 			if err != nil {
 				return err
 			}
@@ -172,14 +171,14 @@ var CheckReadAny = &Check{
 }
 
 var CheckWriteAndRead = &Check{
-	Test: func(dp vfs.DataProvider) error {
-		paths := []vfs.Path{"", "/", "/canWrite1", "/canWrite1/subfolder", "canWrite1_1/subfolder1/subfolder2"}
+	Test: func(dp DataProvider) error {
+		paths := []Path{"", "/", "/canWrite1", "/canWrite1/subfolder", "canWrite1_1/subfolder1/subfolder2"}
 		lengths := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 512, 1024, 4096, 4097, 8192, 8193}
 		for _, path := range paths {
 			for _, testLen := range lengths {
 				tmp := generateTestSlice(testLen)
 				child := path.Child(strconv.Itoa(testLen) + ".bin")
-				writer, err := dp.Write(child)
+				writer, err := Write(child)
 				if err != nil {
 					return err
 				}
@@ -198,7 +197,7 @@ var CheckWriteAndRead = &Check{
 					return fmt.Errorf("expected to write %v bytes but just wrote %v", len(tmp), n)
 				}
 
-				data, err := vfs.ReadAll(dp, child)
+				data, err := ReadAll(child)
 				if err != nil {
 					return err
 				}
@@ -212,32 +211,32 @@ var CheckWriteAndRead = &Check{
 		return nil
 	},
 	Name:        "Write and Read",
-	Description: "Write some stuff and read it again",
+	Description: "Write some stuff and read it agains",
 }
 
 var CheckRename = &Check{
-	Test: func(dp vfs.DataProvider) error {
-		a := vfs.Path("/a.bin")
-		b := vfs.Path("/b.bin")
+	Test: func(dp DataProvider) error {
+		a := Path("/a.bin")
+		b := Path("/b.bin")
 
 		err := dp.Delete(a)
 		if err != nil {
 			return err
 		}
 
-		err = dp.Delete(b)
+		err = Delete(b)
 		if err != nil {
 			return err
 		}
 
 		//renaming of non-a to non-b must fail
-		err = dp.Rename(a, b)
+		err = Rename(a, b)
 		if err == nil {
 			return fmt.Errorf("renaming of non-a to non-b must fail")
 		}
 
 		test0 := generateTestSlice(7)
-		_, err = vfs.WriteAll(dp, a, test0)
+		_, err = WriteAll(a, test0)
 		if err != nil {
 			return err
 		}
@@ -247,11 +246,11 @@ var CheckRename = &Check{
 		if err != nil {
 			return err
 		}
-		_, err = vfs.Stat(dp, a)
+		_, err = Stat(a)
 		if err == nil {
 			return fmt.Errorf("a must be ResourceNotFound")
 		}
-		info, err := vfs.Stat(dp, b)
+		info, err := Stat(b)
 		if err != nil {
 			return fmt.Errorf("b must be available")
 		}
@@ -260,8 +259,8 @@ var CheckRename = &Check{
 		}
 
 		// b exists and c exists, must succeed
-		c := vfs.Path("/c.bin")
-		_, err = vfs.WriteAll(dp, c, generateTestSlice(13))
+		c := Path("/c.bin")
+		_, err = WriteAll(c, generateTestSlice(13))
 		if err != nil {
 			return err
 		}
@@ -270,12 +269,12 @@ var CheckRename = &Check{
 		if err != nil {
 			return err
 		}
-		_, err = vfs.Stat(dp, b)
+		_, err = Stat(b)
 		if err == nil {
 			return fmt.Errorf("b must be ResourceNotFound")
 		}
 
-		info, err = vfs.Stat(dp, c)
+		info, err = Stat(c)
 		if err != nil {
 			return err
 		}
@@ -288,13 +287,13 @@ var CheckRename = &Check{
 	Description: "Renames and their corner cases",
 }
 
-var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
-	c := vfs.Path("/c.bin")
-	_, err := vfs.WriteAll(dp, c, generateTestSlice(13))
+var UnsupportedAttributes = &Check{Test: func(dp DataProvider) error {
+	c := Path("/c.bin")
+	_, err := WriteAll(c, generateTestSlice(13))
 	if err != nil {
 		return err
 	}
-	mustSupport := &vfs.ResourceInfo{}
+	mustSupport := &ResourceInfo{}
 	err = dp.ReadAttrs(c, mustSupport)
 	if err != nil {
 		return err
@@ -305,15 +304,15 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 	if err == nil {
 		return fmt.Errorf("reading into a generic unsupportedType{} with private members and no public fields is an error")
 	}
-	if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+	if UnwrapUnsupportedAttributesError(err) == nil {
 		return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 	}
 
-	err = dp.ReadAttrs(c, "hello world")
+	err = ReadAttrs(c, "hello world")
 	if err == nil {
 		return fmt.Errorf("reading into a value type like a string is always a programming error")
 	}
-	if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+	if UnwrapUnsupportedAttributesError(err) == nil {
 		return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 	}
 
@@ -321,9 +320,15 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 	if err != nil {
 		return err
 	}
+
+	dir, err = ReadDir("")
+	if err != nil {
+		return err
+	}
+
 	count := 0
-	err = dir.ForEach(func(scanner vfs.Scanner) error {
-		mustSupport := &vfs.ResourceInfo{}
+	err = dir.ForEach(func(scanner Scanner) error {
+		mustSupport := &ResourceInfo{}
 		err = scanner.Scan(mustSupport)
 		if err != nil {
 			return err
@@ -334,7 +339,7 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 		if err == nil {
 			return fmt.Errorf("reading into a generic unsupportedType{} with private members and no public fields is an error")
 		}
-		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+		if UnwrapUnsupportedAttributesError(err) == nil {
 			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 		}
 
@@ -342,7 +347,7 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 		if err == nil {
 			return fmt.Errorf("reading into a value type like a string is always a programming error")
 		}
-		if vfs.UnwrapUnsupportedAttributesError(err) == nil {
+		if UnwrapUnsupportedAttributesError(err) == nil {
 			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 		}
 
@@ -366,7 +371,7 @@ var UnsupportedAttributes = &Check{Test: func(dp vfs.DataProvider) error {
 	if err == nil {
 		return fmt.Errorf("writing from a generic unsupportedType{} with private members and no public fields is an error")
 	}
-	if vfs.UnwrapUnsupportedAttributesError(err) == nil && vfs.UnwrapUnsupportedOperationError(err) == nil {
+	if UnwrapUnsupportedAttributesError(err) == nil && UnwrapUnsupportedOperationError(err) == nil {
 		return fmt.Errorf("expected UnsupportedAttributesError or UnsupportedOperationError but got %v", err)
 	}
 
@@ -382,7 +387,7 @@ type unsupportedType struct {
 }
 
 var CloseProvider = &Check{
-	Test: func(dp vfs.DataProvider) error {
+	Test: func(dp DataProvider) error {
 		err := dp.Close()
 		if err != nil {
 			return err
