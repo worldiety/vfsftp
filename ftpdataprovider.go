@@ -109,6 +109,7 @@ func (dp *ftpDataProvider) ReadAttrs(path vfs.Path, dest interface{}) error {
 				return nil
 			}
 		}
+		return &vfs.ResourceNotFoundError{Path: path}
 	}
 	return &vfs.UnsupportedAttributesError{Data: dest}
 }
@@ -159,17 +160,30 @@ func (dp *ftpDataProvider) MkDirs(path vfs.Path) error {
 	return nil
 }
 
+//Exists returns true if the file exists, false if otherwise, error if something else
+func (dp *ftpDataProvider) Exists(path vfs.Path) (bool, error) {
+	return dp.exists(dp.Resolve(path))
+}
+
 func (dp *ftpDataProvider) exists(absPath string) (bool, error) {
-	_, err := dp.conn.FileSize(absPath)
-	if protoErr, ok := err.(*textproto.Error); ok {
-		if protoErr.Code == ftp.StatusFileUnavailable {
+	//TODO the ftp lib cannot stat a single entry
+	list, err := dp.conn.NameList(vfs.Path(absPath).Parent().String())
+	if err != nil {
+		err = wrapErr(err)
+		if _, is := err.(*vfs.ResourceNotFoundError); is {
 			return false, nil
 		}
+		return false, err
 	}
-	if err != nil {
-		return true, nil
+	expectName := vfs.Path(absPath).Name()
+
+	for _, name := range list {
+		if vfs.Path(name).Name() == expectName {
+			return true, nil
+		}
 	}
-	return false, err
+
+	return false, nil
 }
 
 // Rename details: see vfs.DataProvider#Rename

@@ -18,6 +18,23 @@ func TestConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	err = dp.MkDirs("asdfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dp.MkDirs("asdfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ftpdp := dp.(*ftpDataProvider)
+	ok, err := ftpdp.Exists("asdfg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("must exist")
+	}
+
 	cts := &CTS{}
 	cts.All()
 
