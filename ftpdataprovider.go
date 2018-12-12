@@ -247,7 +247,7 @@ func (b *bufferedWriter) Close() error {
 	if perr, ok := err.(*textproto.Error); ok {
 		if perr.Code == ftp.StatusFileUnavailable {
 			//retry by creating parent directory first
-			err2 := b.dp.MkDirs(vfs.Path(b.path).Parent())
+			err2 := b.dp.MkDirs(vfs.Path(b.path).Parent().TrimPrefix(vfs.Path(b.dp.Prefix)))
 			if err2 != nil {
 				return err2
 			}
