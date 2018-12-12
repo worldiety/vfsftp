@@ -120,7 +120,7 @@ func (dp *ftpDataProvider) WriteAttrs(path vfs.Path, src interface{}) error {
 
 // ReadDir details: see vfs.DataProvider#ReadDir
 func (dp *ftpDataProvider) ReadDir(path vfs.Path) (vfs.DirEntList, error) {
-	entries, err := dp.conn.List(path.String())
+	entries, err := dp.conn.List(dp.Resolve(path))
 	if err != nil {
 		return nil, err
 	}
