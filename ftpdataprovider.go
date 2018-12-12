@@ -44,7 +44,7 @@ func (dp *ftpDataProvider) Resolve(path vfs.Path) string {
 	}
 	// security feature: we normalize our path, before adding the prefix to avoid breaking out of our root
 	path = path.Normalize()
-	return filepath.Join(dp.Prefix, filepath.Join(path.Names()...))
+	return vfs.Path(filepath.Join(dp.Prefix, filepath.Join(path.Names()...))).String()
 }
 
 // Read details: see vfs.DataProvider#Read
