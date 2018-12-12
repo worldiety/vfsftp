@@ -51,7 +51,7 @@ func (dp *ftpDataProvider) Resolve(path vfs.Path) string {
 func (dp *ftpDataProvider) Read(path vfs.Path) (io.ReadCloser, error) {
 	res, err := dp.conn.Retr(dp.Resolve(path))
 	if err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 	return res, nil
 }
@@ -122,7 +122,7 @@ func (dp *ftpDataProvider) WriteAttrs(path vfs.Path, src interface{}) error {
 func (dp *ftpDataProvider) ReadDir(path vfs.Path) (vfs.DirEntList, error) {
 	entries, err := dp.conn.List(dp.Resolve(path))
 	if err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 
 	tmp := make([]*ftp.Entry, len(entries))[0:0]
@@ -148,7 +148,7 @@ func (dp *ftpDataProvider) MkDirs(path vfs.Path) error {
 				if ok, _ := dp.exists(chain); !ok {
 					err2 := dp.conn.MakeDir(chain)
 					if err2 != nil {
-						return err2
+						return wrapErr(err2)
 					}
 				}
 
@@ -192,7 +192,7 @@ func (l *fileInfoDirEntList) ForEach(each func(scanner vfs.Scanner) error) error
 		scanner.info = info
 		err := each(scanner)
 		if err != nil {
-			return err
+			return wrapErr(err)
 		}
 	}
 	return nil
@@ -261,4 +261,17 @@ func (b *bufferedWriter) Close() error {
 		}
 	}
 	return nil
+}
+
+// wrapErr inspects the ftp specific error and wraps it into something common as defined by the vfs itself
+func wrapErr(err error) error {
+	if perr, ok := err.(*textproto.Error); ok {
+		switch perr.Code {
+		case ftp.StatusFileUnavailable:
+			return &vfs.ResourceNotFoundError{Cause: err}
+		case ftp.StatusBadFileName:
+			return &vfs.PermissionDeniedError{Cause: err}
+		}
+	}
+	return err
 }
