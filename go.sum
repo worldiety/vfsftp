@@ -1,4 +1,4 @@
 github.com/jlaffaye/ftp v0.0.0-20181101112434-47f21d10f0ee h1:oCvgfeGIc6GipidJVyG0Hd9R/w6TO8bBYyJg15ZgJkw=
 github.com/jlaffaye/ftp v0.0.0-20181101112434-47f21d10f0ee/go.mod h1:lli8NYPQOFy3O++YmYbqVgOcQ1JPCwdOy+5zSjKJ9qY=
-github.com/worldiety/vfs v0.0.2 h1:Gl2ZoVppstQ411Qo49Lo+79Ccbnmq4+uiICfioaEEU8=
-github.com/worldiety/vfs v0.0.2/go.mod h1:cTFLWfKja+5NkdWYjc3gnYUadYNDSQM+XhqBaJ82eX0=
+github.com/worldiety/vfs v0.0.5 h1:5IrIfwj7fPA/f1hV0ZdSJ35GoKW9ql5jaxvRCTusOBw=
+github.com/worldiety/vfs v0.0.5/go.mod h1:cTFLWfKja+5NkdWYjc3gnYUadYNDSQM+XhqBaJ82eX0=

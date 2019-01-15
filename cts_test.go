@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	. "github.com/worldiety/vfs"
+	"log"
 	"strconv"
 	"strings"
 )
 
-// A Check tells if a DataProvider has a specific property or not
+// A Check tells if a FileSystem has a specific property or not
 type Check struct {
-	Test        func(dp DataProvider) error
+	Test        func(dp FileSystem) error
 	Name        string
 	Description string
 }
@@ -59,7 +60,7 @@ func (t *CTS) All() {
 	}
 }
 
-func (t *CTS) Run(dp DataProvider) CTSResult {
+func (t *CTS) Run(dp FileSystem) CTSResult {
 	res := make([]*CheckResult, 0)
 	for _, check := range t.checks {
 		SetDefault(dp)
@@ -79,8 +80,8 @@ func generateTestSlice(len int) []byte {
 
 //======== our actual checks =============
 var CheckIsEmpty = &Check{
-	Test: func(dp DataProvider) error {
-		list, err := ReadDirEnt("")
+	Test: func(dp FileSystem) error {
+		list, err := ReadDir("")
 		if err != nil {
 			return err
 		}
@@ -95,27 +96,27 @@ var CheckIsEmpty = &Check{
 			}
 		}
 		// recheck
-		list, err = ReadDirEnt("")
+		list, err = ReadDir("")
 		if err != nil {
 			return err
 		}
 		if len(list) == 0 {
 			return nil
 		}
-		return fmt.Errorf("DataProvider is not empty and cannot clear it")
+		return fmt.Errorf("FileSystem is not empty and cannot clear it")
 	},
 	Name:        "Empty",
-	Description: "Checks the corner case of an empty DataProvider",
+	Description: "Checks the corner case of an empty FileSystem",
 }
 
 var CheckCanWrite0 = &Check{
-	Test: func(dp DataProvider) error {
+	Test: func(dp FileSystem) error {
 		paths := []Path{"", "/", "/canWrite0", "/canWrite0/subfolder", "canWrite0_1/subfolder1/subfolder2"}
 		lengths := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 512, 1024, 4096, 4097, 8192, 8193}
 		for _, path := range paths {
 			for _, testLen := range lengths {
 				tmp := generateTestSlice(testLen)
-				writer, err := dp.Write(path.Child(strconv.Itoa(testLen) + ".bin"))
+				writer, err := Write(path.Child(strconv.Itoa(testLen) + ".bin"))
 				if err != nil {
 					return err
 				}
@@ -143,8 +144,8 @@ var CheckCanWrite0 = &Check{
 }
 
 var CheckReadAny = &Check{
-	Test: func(dp DataProvider) error {
-		list, err := ReadDirEntRecur("")
+	Test: func(dp FileSystem) error {
+		list, err := ReadDirRecur("")
 		if err != nil {
 			return err
 		}
@@ -171,9 +172,9 @@ var CheckReadAny = &Check{
 }
 
 var CheckWriteAndRead = &Check{
-	Test: func(dp DataProvider) error {
+	Test: func(dp FileSystem) error {
 		paths := []Path{"", "/", "/canWrite1", "/canWrite1/subfolder", "canWrite1_1/subfolder1/subfolder2"}
-		lengths := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 512, 1024, 4096, 4097, 8192, 8193}
+		lengths := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 512, 1024, 4096, 4097, 8192, 8193, 128 * 1024 * 3}
 		for _, path := range paths {
 			for _, testLen := range lengths {
 				tmp := generateTestSlice(testLen)
@@ -205,7 +206,31 @@ var CheckWriteAndRead = &Check{
 				if bytes.Compare(data, tmp) != 0 {
 					return fmt.Errorf("expected that written and read bytes are equal but %v != %v", tmp, data)
 				}
+
 			}
+		}
+
+		// check copy method
+		err := Copy("canWrite1_1", "canWrite2", nil)
+		if err != nil {
+			return err
+		}
+
+		opts := &CopyOptions{OnCopied: func(obj Path, objectsTransferred int64, bytesTransferred int64) {
+			log.Printf("completed obj # %v %v, total %v bytes\n", objectsTransferred, obj, bytesTransferred)
+		}, OnProgress: func(src Path, dst Path, bytes int64, size int64) {
+			log.Printf("copied %v -> %v %v%%\n", src, dst, float32(bytes)/float32(size)*100)
+		}, OnScan: func(obj Path, objects int64, bytes int64) {
+			log.Printf("found obj # %v %v, total %v bytes\n", objects, obj, bytes)
+		}}
+		err = Copy("canWrite1_1", "canWrite2", opts)
+		if err != nil {
+			return err
+		}
+
+		err = Copy("512.bin", "copy512.bin", nil)
+		if err != nil {
+			return err
 		}
 
 		return nil
@@ -215,7 +240,7 @@ var CheckWriteAndRead = &Check{
 }
 
 var CheckRename = &Check{
-	Test: func(dp DataProvider) error {
+	Test: func(dp FileSystem) error {
 		a := Path("/a.bin")
 		b := Path("/b.bin")
 
@@ -287,7 +312,7 @@ var CheckRename = &Check{
 	Description: "Renames and their corner cases",
 }
 
-var UnsupportedAttributes = &Check{Test: func(dp DataProvider) error {
+var UnsupportedAttributes = &Check{Test: func(dp FileSystem) error {
 	c := Path("/c.bin")
 	_, err := WriteAll(c, generateTestSlice(13))
 	if err != nil {
@@ -316,26 +341,21 @@ var UnsupportedAttributes = &Check{Test: func(dp DataProvider) error {
 		return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 	}
 
-	dir, err := dp.ReadDir("")
-	if err != nil {
-		return err
-	}
-
-	dir, err = ReadDir("")
+	dir, err := dp.ReadDir("", nil)
 	if err != nil {
 		return err
 	}
 
 	count := 0
-	err = dir.ForEach(func(scanner Scanner) error {
+	for dir.Next() {
 		mustSupport := &ResourceInfo{}
-		err = scanner.Scan(mustSupport)
+		err = dir.Scan(mustSupport)
 		if err != nil {
 			return err
 		}
 
 		mustNotSupport := &unsupportedType{}
-		err = scanner.Scan(mustNotSupport)
+		err = dir.Scan(mustNotSupport)
 		if err == nil {
 			return fmt.Errorf("reading into a generic unsupportedType{} with private members and no public fields is an error")
 		}
@@ -343,7 +363,7 @@ var UnsupportedAttributes = &Check{Test: func(dp DataProvider) error {
 			return fmt.Errorf("expected UnsupportedAttributesError but got %v", err)
 		}
 
-		err = scanner.Scan("hello world")
+		err = dir.Scan("hello world")
 		if err == nil {
 			return fmt.Errorf("reading into a value type like a string is always a programming error")
 		}
@@ -354,7 +374,8 @@ var UnsupportedAttributes = &Check{Test: func(dp DataProvider) error {
 		count++
 
 		return nil
-	})
+	}
+	err = dir.Err()
 	if err != nil {
 		return err
 	}
@@ -387,7 +408,7 @@ type unsupportedType struct {
 }
 
 var CloseProvider = &Check{
-	Test: func(dp DataProvider) error {
+	Test: func(dp FileSystem) error {
 		err := dp.Close()
 		if err != nil {
 			return err
@@ -396,5 +417,5 @@ var CloseProvider = &Check{
 		return nil
 	},
 	Name:        "Close",
-	Description: "Simply checks if close succeeds. It does not mean that the DataProvider is unusable, because some are stateless",
+	Description: "Simply checks if close succeeds. It does not mean that the FileSystem is unusable, because some are stateless",
 }

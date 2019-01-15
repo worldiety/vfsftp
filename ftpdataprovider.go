@@ -1,29 +1,31 @@
 package vfsftp
 
 import (
-	"bytes"
 	"github.com/jlaffaye/ftp"
 	"github.com/worldiety/vfs"
 	"io"
+	"io/ioutil"
 	"net/textproto"
 	"net/url"
 	"os"
-	"path/filepath"
 )
 
+var _ vfs.FileSystem = (*ftpDataProvider)(nil)
+
 type ftpDataProvider struct {
-	conn   *ftp.ServerConn
-	Prefix string
+	conn *ftp.ServerConn
+	// TmpDir Used to store files before uploading. See also ioutil.TempDir. Keep empty to pick the system default.
+	TmpDir   string
+	myTmpDir string
 }
 
 // Connect opens the ftp and performs a login using information from the url.
 // This FTP implementation is NOT thread safe, because it only ever uses a single connection which is
 // stateful.
-func Connect(url *url.URL) (vfs.DataProvider, error) {
+func Connect(url *url.URL) (vfs.FileSystem, error) {
 	adr := url.Host
 	login := url.User.Username()
 	password, _ := url.User.Password()
-	pathPrefix := url.Path
 
 	conn, err := ftp.Connect(adr)
 	if err != nil {
@@ -33,32 +35,39 @@ func Connect(url *url.URL) (vfs.DataProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ftpDataProvider{conn, pathPrefix}, nil
+	return &ftpDataProvider{conn, "", ""}, nil
 }
 
 // Resolve creates a platform specific filename from the given invariant path by adding the Prefix and using
 // the platform specific name separator. If AllowRelativePaths is false (default), .. will be silently ignored.
 func (dp *ftpDataProvider) Resolve(path vfs.Path) string {
-	if len(dp.Prefix) == 0 {
-		return path.String()
-	}
-	// security feature: we normalize our path, before adding the prefix to avoid breaking out of our root
-	path = path.Normalize()
-	return vfs.Path(filepath.Join(dp.Prefix, filepath.Join(path.Names()...))).String()
+	return path.String()
 }
 
-// Read details: see vfs.DataProvider#Read
-func (dp *ftpDataProvider) Read(path vfs.Path) (io.ReadCloser, error) {
-	res, err := dp.conn.Retr(dp.Resolve(path))
-	if err != nil {
-		return nil, wrapErr(err)
-	}
-	return res, nil
-}
+// Open details: see vfs.DataProvider#Open
+func (dp *ftpDataProvider) Open(path vfs.Path, flag int, perm os.FileMode) (vfs.Resource, error) {
+	if flag == os.O_RDONLY {
+		res, err := dp.conn.Retr(dp.Resolve(path))
+		if err != nil {
+			return nil, wrapErr(err)
+		}
+		return vfs.NewResourceFromReader(res), nil
 
-// Write details: see vfs.DataProvider#Write
-func (dp *ftpDataProvider) Write(path vfs.Path) (io.WriteCloser, error) {
-	return &bufferedWriter{&bytes.Buffer{}, dp, dp.Resolve(path)}, nil
+	} else {
+		if dp.myTmpDir == "" {
+			dir, err := ioutil.TempDir(dp.TmpDir, "ftp")
+			if err != nil {
+				return nil, err
+			}
+			dp.myTmpDir = dir
+		}
+
+		f, err := ioutil.TempFile(dp.myTmpDir, "upload")
+		if err != nil {
+			return nil, err
+		}
+		return &diskBufferedWriter{f, dp, dp.Resolve(path)}, nil
+	}
 }
 
 // Delete details: see vfs.DataProvider#Delete
@@ -120,7 +129,7 @@ func (dp *ftpDataProvider) WriteAttrs(path vfs.Path, src interface{}) error {
 }
 
 // ReadDir details: see vfs.DataProvider#ReadDir
-func (dp *ftpDataProvider) ReadDir(path vfs.Path) (vfs.DirEntList, error) {
+func (dp *ftpDataProvider) ReadDir(path vfs.Path, options interface{}) (vfs.DirEntList, error) {
 	entries, err := dp.conn.List(dp.Resolve(path))
 	if err != nil {
 		return nil, wrapErr(err)
@@ -134,7 +143,22 @@ func (dp *ftpDataProvider) ReadDir(path vfs.Path) (vfs.DirEntList, error) {
 		tmp = append(tmp, entry)
 	}
 
-	return &fileInfoDirEntList{tmp}, nil
+	return vfs.NewDirEntList(int64(len(tmp)), func(idx int64, out *vfs.ResourceInfo) error {
+		info := tmp[int(idx)]
+		out.Name = info.Name
+		switch info.Type {
+		case ftp.EntryTypeFile:
+			out.Mode = 0
+		case
+			ftp.EntryTypeFolder:
+			out.Mode = os.ModeDir
+		case ftp.EntryTypeLink:
+			out.Mode = os.ModeSymlink
+		}
+		out.Size = int64(info.Size)
+		out.ModTime = info.Time.UnixNano() / 1e6
+		return nil
+	}), nil
 }
 
 func (dp *ftpDataProvider) MkDirs(path vfs.Path) error {
@@ -196,85 +220,70 @@ func (dp *ftpDataProvider) Close() error {
 	return dp.conn.Quit()
 }
 
-type fileInfoDirEntList struct {
-	list []*ftp.Entry
-}
-
-func (l *fileInfoDirEntList) ForEach(each func(scanner vfs.Scanner) error) error {
-	scanner := &fileScanner{}
-	for _, info := range l.list {
-		scanner.info = info
-		err := each(scanner)
-		if err != nil {
-			return wrapErr(err)
-		}
-	}
-	return nil
-}
-
-func (l *fileInfoDirEntList) Size() int64 {
-	return int64(len(l.list))
-}
-
-// Close does nothing
-func (l *fileInfoDirEntList) Close() error {
-	return nil
-}
-
+// The contract of the used ftp client is unusable and does not allow a byte sink.
+// We have three choices, which are both bad:
+//   1. buffer the entire file in memory or
+//   2. buffer the entire file on-disk or
+//   3. use some kind of piping
 //
-type fileScanner struct {
-	info *ftp.Entry
-}
-
-func (f *fileScanner) Scan(dest interface{}) error {
-	if out, ok := dest.(*vfs.ResourceInfo); ok {
-		out.Name = f.info.Name
-		switch f.info.Type {
-		case ftp.EntryTypeFile:
-			out.Mode = 0
-		case
-			ftp.EntryTypeFolder:
-			out.Mode = os.ModeDir
-		case ftp.EntryTypeLink:
-			out.Mode = os.ModeSymlink
-		}
-		out.Size = int64(f.info.Size)
-		out.ModTime = f.info.Time.UnixNano() / 1e6
-		return nil
-	}
-	return &vfs.UnsupportedAttributesError{Data: dest}
-}
-
-// TODO buffering in memory is a bad idea but piping is also ugly because of the extra go routine and channel logic
-type bufferedWriter struct {
-	buf  *bytes.Buffer
+// The piping approach is complex and error prone and also requires a bunch of go routines. The provided pipe of the go
+// SDK does work because it causes a deadlock. The best compromise, besides of forking and fixing the ftp API
+// it to buffer the entire file on disk before uploading. However this breaks progress detection and needs a
+// lot of disk space.
+type diskBufferedWriter struct {
+	file *os.File
 	dp   *ftpDataProvider
-	path string
+	dst  string
 }
 
-func (b *bufferedWriter) Write(p []byte) (n int, err error) {
-	return b.buf.Write(p)
+func (w *diskBufferedWriter) ReadAt(b []byte, off int64) (n int, err error) {
+	return w.file.ReadAt(b, off)
 }
 
-func (b *bufferedWriter) Close() error {
-	err := b.dp.conn.Stor(b.path, bytes.NewReader(b.buf.Bytes()))
+func (w *diskBufferedWriter) Read(p []byte) (n int, err error) {
+	return w.file.Read(p)
+}
+
+func (w *diskBufferedWriter) WriteAt(b []byte, off int64) (n int, err error) {
+	return w.file.WriteAt(b, off)
+}
+
+func (w *diskBufferedWriter) Write(p []byte) (n int, err error) {
+	return w.file.Write(p)
+}
+
+func (w *diskBufferedWriter) Seek(offset int64, whence int) (int64, error) {
+	return w.file.Seek(offset, whence)
+}
+
+func (w *diskBufferedWriter) Close() error {
+	//seek to the beginning of the file
+	_, err := w.file.Seek(0, io.SeekStart)
+	if err != nil {
+		_ = w.file.Close()
+		return err
+	}
+
+	//try to actually transfer the data
+	err = w.dp.conn.Stor(w.dst, w.file)
 	if perr, ok := err.(*textproto.Error); ok {
 		if perr.Code == ftp.StatusFileUnavailable {
 			//retry by creating parent directory first
-			err2 := b.dp.MkDirs(vfs.Path(b.path).Parent().TrimPrefix(vfs.Path(b.dp.Prefix)))
+			err2 := w.dp.MkDirs(vfs.Path(w.dst).Parent())
 			if err2 != nil {
 				return err2
 			}
 
 			// oh, we created the parent successfully, retry the write
-			err3 := b.dp.conn.Stor(b.path, bytes.NewReader(b.buf.Bytes()))
+			err3 := w.dp.conn.Stor(w.dst, w.file)
 			if err3 != nil {
 				//intentionally return the first error
 				return err
 			}
 		}
 	}
-	return nil
+
+	return w.file.Close()
 }
 
 // wrapErr inspects the ftp specific error and wraps it into something common as defined by the vfs itself
