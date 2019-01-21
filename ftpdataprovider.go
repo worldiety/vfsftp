@@ -38,13 +38,18 @@ func Connect(url *url.URL) (vfs.FileSystem, error) {
 	return &ftpDataProvider{conn, "", ""}, nil
 }
 
+// Link details: see vfs.FileSystem#Link
+func (dp *ftpDataProvider) Link(oldPath vfs.Path, newPath vfs.Path, mode vfs.LinkMode, flags int32) error {
+	return &vfs.UnsupportedOperationError{}
+}
+
 // Resolve creates a platform specific filename from the given invariant path by adding the Prefix and using
 // the platform specific name separator. If AllowRelativePaths is false (default), .. will be silently ignored.
 func (dp *ftpDataProvider) Resolve(path vfs.Path) string {
 	return path.String()
 }
 
-// Open details: see vfs.DataProvider#Open
+// Open details: see vfs.FileSystem#Open
 func (dp *ftpDataProvider) Open(path vfs.Path, flag int, perm os.FileMode) (vfs.Resource, error) {
 	if flag == os.O_RDONLY {
 		res, err := dp.conn.Retr(dp.Resolve(path))
@@ -70,7 +75,7 @@ func (dp *ftpDataProvider) Open(path vfs.Path, flag int, perm os.FileMode) (vfs.
 	}
 }
 
-// Delete details: see vfs.DataProvider#Delete
+// Delete details: see vfs.FileSystem#Delete
 func (dp *ftpDataProvider) Delete(path vfs.Path) error {
 	err := dp.conn.Delete(dp.Resolve(path))
 	if err != nil {
@@ -88,7 +93,7 @@ func (dp *ftpDataProvider) Delete(path vfs.Path) error {
 	return err
 }
 
-// ReadAttrs details: see vfs.DataProvider#ReadAttrs
+// ReadAttrs details: see vfs.FileSystem#ReadAttrs
 func (dp *ftpDataProvider) ReadAttrs(path vfs.Path, dest interface{}) error {
 	//this is ugly, because the current ftp implementation does not support the STAT request
 	if info, ok := dest.(*vfs.ResourceInfo); ok {
@@ -123,12 +128,12 @@ func (dp *ftpDataProvider) ReadAttrs(path vfs.Path, dest interface{}) error {
 	return &vfs.UnsupportedAttributesError{Data: dest}
 }
 
-// WriteAttrs details: see vfs.DataProvider#WriteAttrs
+// WriteAttrs details: see vfs.FileSystem#WriteAttrs
 func (dp *ftpDataProvider) WriteAttrs(path vfs.Path, src interface{}) error {
 	return &vfs.UnsupportedOperationError{}
 }
 
-// ReadDir details: see vfs.DataProvider#ReadDir
+// ReadDir details: see vfs.FileSystem#ReadDir
 func (dp *ftpDataProvider) ReadDir(path vfs.Path, options interface{}) (vfs.DirEntList, error) {
 	entries, err := dp.conn.List(dp.Resolve(path))
 	if err != nil {
@@ -210,7 +215,7 @@ func (dp *ftpDataProvider) exists(absPath string) (bool, error) {
 	return false, nil
 }
 
-// Rename details: see vfs.DataProvider#Rename
+// Rename details: see vfs.FileSystem#Rename
 func (dp *ftpDataProvider) Rename(oldPath vfs.Path, newPath vfs.Path) error {
 	return dp.conn.Rename(dp.Resolve(oldPath), dp.Resolve(newPath))
 }
