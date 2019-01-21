@@ -1,4 +1,4 @@
-module github.com/worldiety/vfsftp
+module github.com/worldiety/vfs-ftp
 
 require (
 	github.com/jlaffaye/ftp v0.0.0-20181101112434-47f21d10f0ee
